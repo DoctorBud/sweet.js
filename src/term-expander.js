@@ -308,7 +308,7 @@ export default class TermExpander extends ASTDispatcher {
 
   expandSyntaxTemplate(term) {
     let r = processTemplate(term.template.inner());
-    let str = Syntax.from("string", serializer.write(r.template));
+    let str = serializer.write(r.template);
     let callee = new T.IdentifierExpression({ name: Syntax.from("identifier", 'syntaxTemplate') });
 
     let expandedInterps = r.interp.map(i => {

@@ -1,3 +1,5 @@
+// @flow
+import * as S from 'sweet-spec';
 import * as _ from 'ramda';
 import { List } from 'immutable';
 import ParseReducer from './parse-reducer.js';
@@ -7,6 +9,7 @@ import Syntax from "./syntax";
 import codegen, { FormattedCodeGen } from 'shift-codegen';
 import Term, { isVariableDeclaration, isImport, isExport } from "./terms";
 import Reader from './shift-reader';
+import SweetToShiftReducer from './sweet-to-shift-reducer';
 
 import { unwrap } from './macro-context';
 
@@ -73,7 +76,7 @@ export function evalRuntimeValues(terms, context) {
 }
 
 // (Expression, Context) -> [function]
-export function evalCompiletimeValue(expr, context) {
+export function evalCompiletimeValue(expr: S.Expression, context: any) {
   let deserializer = makeDeserializer(context.bindings);
   let sandbox = {
     syntaxQuote: function (strings, ...values) {
@@ -89,31 +92,31 @@ export function evalCompiletimeValue(expr, context) {
   let sandboxKeys = List(Object.keys(sandbox));
   let sandboxVals = sandboxKeys.map(k => sandbox[k]).toArray();
 
-  let parsed = reducer(new ParseReducer(context), new Term("Module", {
+  let parsed = new S.Module({
     directives: List(),
-    items: List.of(new Term("ExpressionStatement", {
-      expression: new Term("FunctionExpression", {
+    items: List.of(new S.ExpressionStatement({
+      expression: new S.FunctionExpression({
         isGenerator: false,
         name: null,
-        params: new Term("FormalParameters", {
+        params: new S.FormalParameters({
           items: sandboxKeys.map(param => {
-            return new Term("BindingIdentifier", {
+            return new S.BindingIdentifier({
               name: Syntax.from("identifier", param)
             });
           }),
           rest: null
         }),
-        body: new Term("FunctionBody", {
-          directives: List.of(new Term('Directive', {
+        body: new S.FunctionBody({
+          directives: List.of(new S.Directive({
             rawValue: 'use strict'
           })),
-          statements: List.of(new Term("ReturnStatement", {
+          statements: List.of(new S.ReturnStatement({
             expression: expr
           }))
         })
       })
     }))
-  }));
+  }).reduce(new SweetToShiftReducer(context.phase));
 
   let gen = codegen(parsed, new FormattedCodeGen);
   let result = context.transform(gen, {

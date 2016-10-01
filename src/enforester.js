@@ -1905,9 +1905,10 @@ export class Enforester {
       let name = this.advance();
 
       let syntaxTransform = this.getFromCompiletimeEnvironment(name);
-      if (syntaxTransform == null || typeof syntaxTransform.value !== "function") {
-        throw this.createError(name,
-          "the macro name was not bound to a value that could be invoked");
+      if (syntaxTransform == null) {
+        throw this.createError(name, `The macro ${name.resolve(this.context.phase)} does not have a bound value`);
+      } else if (typeof syntaxTransform.value !== "function") {
+        throw this.createError(name, `The macro ${name.resolve(this.context.phase)} was not bound to a callable value: ${syntaxTransform.value}`);
       }
       let useSiteScope = freshScope("u");
       let introducedScope = freshScope("i");
@@ -1921,6 +1922,15 @@ export class Enforester {
         throw this.createError(name, "macro must return a list but got: " + result);
       }
       result = result.map(stx => {
+        throw new Error(`Breadcrumb:
+          And thus we have an untenable situation. Mixing terms and syntax objects
+          in the same "stream" is hard to track and leads to all sorts of
+          unexpected behavior. What can we do?
+
+          - wrap all syntax objects in a term?
+          - unpack terms that are interpoated into a macro?
+            - (but then how to handle precedence issues?)
+        `);
         if (!(stx && typeof stx.addScope === 'function')) {
           throw this.createError(name, 'macro must return syntax objects or terms but got: ' + stx);
         }

@@ -1,1 +1,4 @@
-({ get width() { return m_width } })
+syntaxrec m = function(ctx) {
+  return #`200`;
+}
+m

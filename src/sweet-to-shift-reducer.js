@@ -42,4 +42,34 @@ export default class extends Term.CloneReducer {
       property: s.property.val()
     });
   }
+
+  reduceFunctionBody(t: Term, s: { statements: List<any>, directives: List<any> }) {
+    return new S.FunctionBody({
+      directives: s.directives.toArray(),
+      statements: s.statements.toArray()
+    });
+  }
+
+  reduceVariableDeclarationStatement(t: Term, s: { declaration: any }) {
+    if (t.declaration.kind === 'syntax' || t.declaration.kind === 'syntaxrec') {
+      return new S.EmptyStatement();
+    }
+    return new S.VariableDeclarationStatement({
+      declaration: s.declaration
+    });
+  }
+
+  reduceVariableDeclaration(t: Term, s: { kind: any, declarators: List<any> }) {
+    return new S.VariableDeclaration({
+      kind: s.kind,
+      declarators: s.declarators.toArray()
+    });
+  }
+
+  reduceCallExpression(t: Term, s: { callee: any, arguments: List<any> }) {
+    return new S.CallExpression({
+      callee: s.callee,
+      arguments: s.arguments.toArray()
+    });
+  }
 }

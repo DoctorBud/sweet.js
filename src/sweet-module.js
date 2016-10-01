@@ -38,7 +38,6 @@ export default class SweetModule {
   }
 
   codegen() {
-    debugger;
     return codegen(this.parse()).code;
   }
 }

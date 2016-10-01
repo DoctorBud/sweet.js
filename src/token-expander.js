@@ -1,3 +1,5 @@
+// @flow
+import Term, * as S from 'sweet-spec';
 import { List } from 'immutable';
 import {  Enforester } from "./enforester";
 import TermExpander from "./term-expander.js";
@@ -12,7 +14,70 @@ import {  freshScope } from "./scope";
 import { ALL_PHASES } from './syntax';
 import ASTDispatcher from './ast-dispatcher';
 import { collectBindings } from './hygiene-utils';
-import ScopeRemovingReducer from './scope-removing-reducer.js';
+import Syntax from './syntax.js';
+
+class RegisterBindingsReducer extends Term.CloneReducer {
+  useScope: any;
+  phase: number;
+  bindings: any;
+  skipDup: boolean;
+  env: Env;
+
+  constructor(useScope: any, phase: number, skipDup: boolean, bindings: any, env: Env) {
+    super();
+    this.useScope = useScope;
+    this.phase = phase;
+    this.bindings = bindings;
+    this.skipDup = skipDup;
+    this.env = env;
+  }
+
+  reduceBindingIdentifier(t: Term, s: { name: Syntax }) {
+    let newName = s.name.removeScope(this.useScope, this.phase);
+    let newBinding = gensym(newName.val());
+    this.bindings.add(newName, {
+      binding: newBinding,
+      phase: this.phase,
+      skipDup: this.skipDup
+    });
+    this.env.set(newBinding.toString(), new VarBindingTransform(newName));
+    return t.extend({
+      name: newName
+    });
+  }
+}
+
+class RegisterSyntaxBindingsReducer extends Term.CloneReducer {
+  useScope: any;
+  phase: number;
+  bindings: any;
+  env: Env;
+  val: any;
+
+  constructor(useScope: any, phase: number, bindings: any, env: Env, val: any) {
+    super();
+    this.useScope = useScope;
+    this.phase = phase;
+    this.bindings = bindings;
+    this.env = env;
+    this.val = val;
+  }
+
+  reduceBindingIdentifier(t: Term, s: { name: Syntax }) {
+    let newName = s.name.removeScope(this.useScope, this.phase);
+    let newBinding = gensym(newName.val());
+    this.bindings.add(newName, {
+      binding: newBinding,
+      phase: this.phase,
+      skipDup: false
+    });
+    let resolvedName = newName.resolve(this.phase);
+    this.env.set(resolvedName, new CompiletimeTransform(this.val));
+    return t.extend({
+      name: newName
+    });
+  }
+}
 
 function bindImports(impTerm, exModule, context) {
   let names = [];
@@ -76,12 +141,12 @@ function removeNames(impTerm, names) {
 // }
 
 export default class TokenExpander extends ASTDispatcher {
-  constructor(context) {
+  constructor(context: any) {
     super('expand', false);
     this.context = context;
   }
 
-  expand(stxl) {
+  expand(stxl: List<Syntax>) {
     let result = [];
     if (stxl.size === 0) {
       return List(result);
@@ -89,25 +154,21 @@ export default class TokenExpander extends ASTDispatcher {
     let prev = List();
     let enf = new Enforester(stxl, prev, this.context);
 
-    while(!enf.done) {
+    while (!enf.done) {
       result.push(this.dispatch(enf.enforest()));
     }
 
     return List(result);
   }
 
-  expandVariableDeclarationStatement(term) {
+  expandVariableDeclarationStatement(term: S.VariableDeclarationStatement) {
     return term.extend({
       declaration: this.registerVariableDeclaration(term.declaration)
     });
   }
 
   expandFunctionDeclaration(term) {
-    let registeredTerm = this.registerFunctionOrClass(term);
-    let stx = registeredTerm.name.name;
-    this.context.env.set(stx.resolve(this.context.phase),
-                         new VarBindingTransform(stx));
-    return registeredTerm;
+    return this.registerFunctionOrClass(term);
   }
 
   // TODO: think about function expressions
@@ -153,48 +214,44 @@ export default class TokenExpander extends ASTDispatcher {
 
 
   registerFunctionOrClass(term) {
-    let name = term.name.reduce(new ScopeRemovingReducer(this.context.useScope, this.context.phase));
-    collectBindings(term.name).forEach(stx => {
-      let newBinding = gensym(stx.val());
-      this.context.bindings.add(stx, {
-        binding: newBinding,
-        phase: this.context.phase,
-        skipDup: false
-      });
-      // the meaning of a function declaration name is a runtime var binding
-      this.context.env.set(newBinding.toString(), new VarBindingTransform(stx));
+    let red = new RegisterBindingsReducer(
+      this.context.useScope,
+      this.context.phase,
+      false,
+      this.context.bindings,
+      this.context.env
+    );
+    return term.extend({
+      name: term.name.reduce(red)
     });
-    return term.extend({ name });
   }
 
   registerVariableDeclaration(term) {
-    if (T.isSyntaxDeclaration(term) || T.isSyntaxrecDeclaration(term)) {
+    if (term.kind === 'syntax' || term.kind === 'syntaxrec') {
       return this.registerSyntaxDeclaration(term);
     }
+    let red = new RegisterBindingsReducer(
+      this.context.useScope,
+      this.context.phase,
+      term.kind === 'var',
+      this.context.bindings,
+      this.context.env
+    );
     return term.extend({
       declarators: term.declarators.map(decl => {
-        let binding = decl.binding.reduce(new ScopeRemovingReducer(this.context.useScope, this.context.phase));
-        collectBindings(binding).forEach(stx => {
-          let newBinding = gensym(stx.val());
-          this.context.bindings.add(stx, {
-            binding: newBinding,
-            phase: this.context.phase,
-            skipDup: term.kind === 'var'
-          });
-          // the meaning of a var/let/const declaration is a var binding
-          this.context.env.set(newBinding.toString(), new VarBindingTransform(stx));
-        });
-        return decl.extend({ binding });
+        return decl.extend({
+          binding: decl.binding.reduce(red)
+        })
       })
     });
   }
 
   registerSyntaxDeclaration(term) {
-    // syntax id^{a, b} = <init>^{a, b}
-    // ->
-    // syntaxrec id^{a,b,c} = function() { return <<id^{a}>> }
-    // syntaxrec id^{a,b} = <init>^{a,b,c}
-    if (T.isSyntaxDeclaration(term)) {
+    if (term.kind === 'syntax') {
+      // syntax id^{a, b} = <init>^{a, b}
+      // ->
+      // syntaxrec id^{a,b,c} = function() { return <<id^{a}>> }
+      // syntaxrec id^{a,b} = <init>^{a,b,c}
       let scope = freshScope('nonrec');
       term = term.extend({
         declarators: term.declarators.map(decl => {
@@ -209,12 +266,10 @@ export default class TokenExpander extends ASTDispatcher {
         })
       });
     }
-
     // for syntax declarations we need to load the compiletime value
     // into the environment
     return term.extend({
       declarators: term.declarators.map(decl => {
-        let binding = decl.binding.removeScope(this.context.useScope, this.context.phase);
         // each compiletime value needs to be expanded with a fresh
         // environment and in the next higher phase
         let syntaxExpander = new TermExpander(_.merge(this.context, {
@@ -223,21 +278,21 @@ export default class TokenExpander extends ASTDispatcher {
           store: this.context.store
         }));
         let init = syntaxExpander.expand(decl.init);
-        let val = evalCompiletimeValue(init.gen(), _.merge(this.context, {
+        let val = evalCompiletimeValue(init, _.merge(this.context, {
           phase: this.context.phase + 1
         }));
-        collectBindings(binding).forEach(stx => {
-          let newBinding = gensym(stx.val());
-          this.context.bindings.add(stx, {
-            binding: newBinding,
-            phase: this.context.phase,
-            skipDup: false
-          });
-          let resolvedName = stx.resolve(this.context.phase);
-          this.context.env.set(resolvedName, new CompiletimeTransform(val));
-        });
-        return decl.extend({ binding, init });
+        let red = new RegisterSyntaxBindingsReducer(
+          this.context.useScope,
+          this.context.phase,
+          this.context.bindings,
+          this.context.env,
+          val);
+        return decl.extend({ binding: decl.binding.reduce(red), init });
       })
     });
   }
+
+  // registerSyntaxDeclarator(term) {
+  //
+  // }
 }

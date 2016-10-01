@@ -33,7 +33,7 @@
     "test:curr": "ava build/test/modules/export.js",
     "test:smoke": "ava build/test/*.js !build/test/assertions.js",
     "test:full": "npm run build && ava",
-    "test": "ava build/test/expressions/*.js",
+    "test": "ava build/test/test_macro_expansion.js",
     "report": "nyc ava && nyc report --reporter=html",
     "docs": "asciidoctorjs doc/1.0/tutorial.adoc & asciidoctorjs doc/1.0/reference.adoc",
     "dist": "npm run build && npm run build:browser && npm run docs && cp build/src/*.js dist"
